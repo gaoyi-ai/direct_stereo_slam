@@ -27,8 +27,8 @@
 #include "SSE2NEON.h"
 #endif
 
-#define DEBUG_PLOT false
-#define DEBUG_PRINT false
+#define DEBUG_PLOT true
+#define DEBUG_PRINT true
 
 namespace dso {
 

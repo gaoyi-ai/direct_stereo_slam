@@ -42,6 +42,7 @@
 #include <cmath>
 #include <fstream>
 #include <queue>
+#include "stereo_matching/ELASWrapper.h"
 
 namespace dso {
 int FrameHessian::instanceCounter = 0;
@@ -678,6 +679,8 @@ void FrontEnd::addActiveStereoFrame(ImageAndExposure *image0,
       shell1->incoming_id = incoming_id;
       fh1_->shell = shell1;
       fh1_->makeImages(image1->image, 0);
+
+      elas_wrapper_->publish_keyframes(fh, fh1_, &h_calib_);
     }
 
     lock.unlock();
@@ -699,8 +702,14 @@ void FrontEnd::deliverTrackedFrame(FrameHessian *fh, bool needKF) {
   } else
     handleKey(IOWrap::waitKey(1));
 
-  if (needKF)
-    makeKeyFrame(fh);
+  if (needKF) {
+      // 关键帧在 SCALE OPTIMIZATION 中需要使用双目图像
+      // 并且在优化后删除右目图像
+      // 其余流程中均未使用右目图像
+
+      makeKeyFrame(fh);
+
+  }
   else
     makeNonKeyFrame(fh);
 }
@@ -804,6 +813,7 @@ void FrontEnd::makeKeyFrame(FrameHessian *fh) {
 
   // =========================== SCALE OPTIMIZATION =========================
   if (scale_opt_thres_ > 0 && all_keyframes_history_.size() > 4) {
+    // 利用双目图像优化尺度
     float scale_error = optimizeScale();
     scale_errors_.push_back(scale_error);
   } else {
@@ -1070,6 +1080,11 @@ void FrontEnd::setLoopHandler(LoopHandler *loop_handler) {
 
 int FrontEnd::getTotalKFSize() {
   return all_keyframes_history_.size() + prev_kf_size_;
+}
+
+/* ============================ Stereo Matching ============================= */
+void FrontEnd::setElasWrapper(ELASWrapper *elasWrapper) {
+  elas_wrapper_ = elasWrapper;
 }
 
 } // namespace dso

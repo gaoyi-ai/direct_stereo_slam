@@ -70,6 +70,13 @@ void PangolinLoopViewer::run() {
           .SetBounds(0.3, 1.0, 0.0, 1.0, -ratio)
           .SetHandler(new pangolin::Handler3D(Visualization3D_camera));
 
+  pangolin::OpenGlRenderState VisualizationELAS3D_camera(proj_mat, model_view);
+
+  pangolin::View &VisualizationELAS3D_display =
+      pangolin::CreateDisplay()
+          .SetBounds(0.3, 1.0, 0.0, 1.0, -ratio)
+          .SetHandler(new pangolin::Handler3D(VisualizationELAS3D_camera));
+
   // keyframe depth visualization
   pangolin::GlTexture texKFDepth(w_, h_, GL_RGB, false, 0, GL_RGB,
                                  GL_UNSIGNED_BYTE);
@@ -104,6 +111,11 @@ void PangolinLoopViewer::run() {
     }
     drawConstraints();
     lk3d.unlock();
+
+    VisualizationELAS3D_display.Activate(VisualizationELAS3D_camera);
+    boost::unique_lock<boost::mutex> lkelas3d(model_elas3d_mutex_);
+    drawElas3D();
+    lkelas3d.unlock();
 
     open_images_mutex_.lock();
     if (kf_img_changed_)
@@ -214,6 +226,29 @@ void PangolinLoopViewer::pushDepthImage(MinimalImageB3 *image) {
   boost::unique_lock<boost::mutex> lk(open_images_mutex_);
   memcpy(internal_kf_img_->data, image->data, w_ * h_ * 3);
   kf_img_changed_ = true;
+}
+
+void PangolinLoopViewer::refreshElasPtsData(
+    const std::vector<Eigen::Vector3d> &pts, size_t cur_sz) {
+  boost::unique_lock<boost::mutex> lk(model_elas3d_mutex_);
+  assert(cur_sz <= pts.size());
+  elas3d_pts_ = pts;
+  elas3d_cur_sz_ = cur_sz;
+}
+
+void PangolinLoopViewer::drawElas3D() {
+  glPointSize(3.0);
+
+  glBegin(GL_POINTS);
+  for (size_t i = 0; i < elas3d_pts_.size(); i++) {
+    if (i < elas3d_cur_sz_) {
+      glColor3ub(0, 255, 0);
+    } else {
+      glColor3ub(255, 0, 0);
+    }
+    glVertex3f(elas3d_pts_[i](0), elas3d_pts_[i](1), elas3d_pts_[i](2));
+  }
+  glEnd();
 }
 
 } // namespace IOWrap

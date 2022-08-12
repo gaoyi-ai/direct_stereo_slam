@@ -328,7 +328,7 @@ void LoopHandler::run() {
             }
           }
 
-          // merge matech lidar pts for Pangolin visualization
+          // merge match lidar pts for Pangolin visualization
           Eigen::Matrix<double, 4, 1> pt_matched, pt_cur;
           pt_matched(3) = 1.0;
           for (size_t i = 0; i < matched_frame->pts_spherical.size(); i++) {

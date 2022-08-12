@@ -39,6 +39,7 @@
 
 #include "loop_closure/LoopHandler.h"
 #include "scale_optimization/TrackerAndScaler.h"
+#include "stereo_matching/ELASWrapper.h"
 
 namespace dso {
 namespace IOWrap {
@@ -215,5 +216,11 @@ private:
   /* ============================ Loop closure ============================= */
   int prev_kf_size_; // previous kf size for increasing kf id
   LoopHandler *loop_handler_;
+
+  /* ============================ Stereo Matching ============================= */
+  ELASWrapper *elas_wrapper_;
+public:
+  void setElasWrapper(ELASWrapper *elasWrapper);
+
 };
 } // namespace dso
