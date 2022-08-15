@@ -5,15 +5,21 @@
 #ifndef DIRECT_STEREO_SLAM_ELASWRAPPER_H
 #define DIRECT_STEREO_SLAM_ELASWRAPPER_H
 
+#include <queue>
+
+#include <libelas/elas.h>
+
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <image_geometry/stereo_camera_model.h>
-#include <libelas/elas.h>
-#include <boost/scoped_ptr.hpp>
 #include <message_filters/subscriber.h>
 #include <pcl/impl/point_types.hpp>
 #include <pcl/point_cloud.h>
+
 #include <g2o/types/slam3d/se3quat.h>
+#include <g2o/types/slam3d/types_slam3d.h>
+#include "FullSystem/HessianBlocks.h"
+#include "util/FrameShell.h"
 #include "loop_closure/pangolin_viewer/PangolinLoopViewer.h"
 
 namespace dso {
@@ -25,31 +31,30 @@ namespace dso {
   }
 }
 
-struct ElasFrame {
+struct Elas3DFrame {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   int kf_id;                      // kF id, for pose graph and visualization
   int incoming_id;                // increasing id, for ground truth
   g2o::SE3Quat tfm_w_c;           // coordinate in pose graph
   Eigen::Vector3d trans_w_c_orig; // original pose for logging
 
-
   dso::FrameHessian *fh0;
   dso::FrameHessian *fh1;
   std::vector<float> cam;
   float ab_exposure;
 
+  std::vector<Eigen::Vector3d> pts;
 
-  ElasFrame(dso::FrameHessian *fh0,dso::FrameHessian *fh1,
-            const std::vector<float> &cam
-            )
-      : fh0(fh0),fh1(fh1),kf_id(fh0->frameID),
+  Elas3DFrame(dso::FrameHessian *fh0, dso::FrameHessian *fh1,
+            const std::vector<float> &cam)
+      : fh0(fh0), fh1(fh1) ,kf_id(fh0->frameID),
         incoming_id(fh0->shell->incoming_id),
         tfm_w_c(g2o::SE3Quat(fh0->shell->camToWorld.rotationMatrix(),
-                             fh->shell->camToWorld.translation())),
+                             fh0->shell->camToWorld.translation())),
         trans_w_c_orig(tfm_w_c.translation()), cam(cam),
-        ab_exposure(fh0->ab_exposure) {}
+        ab_exposure(fh0->ab_exposure){}
 
-  ~ElasFrame() {
+  ~Elas3DFrame() {
   }
 };
 
@@ -65,9 +70,11 @@ public:
   void process(const sensor_msgs::ImageConstPtr &l_image_msg,
                const sensor_msgs::ImageConstPtr &r_image_msg);
 
-  void publish_point_cloud(const sensor_msgs::ImageConstPtr &l_image_msg, float *l_disp_data,
-                           const std::vector<int32_t> &inliers,
-                           int32_t l_width, int32_t l_height);
+  void publish_keyframes(dso::FrameHessian *fh0, dso::FrameHessian *fh1, dso::CalibHessian *h_calib);
+
+  void generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg, float *l_disp_data,
+                  const std::vector<int32_t> &inliers,
+                  int32_t l_width, int32_t l_height);
 
   void update_stereo_model(const sensor_msgs::CameraInfoConstPtr &l_info_msg,
                            const sensor_msgs::CameraInfoConstPtr &r_info_msg);
@@ -76,7 +83,7 @@ public:
 
   void join();
 
-  void publish_keyframes(dso::FrameHessian *fh0, dso::FrameHessian *fh1, dso::CalibHessian *h_calib);
+  void save_pc();
 
 private:
 
@@ -113,9 +120,18 @@ private:
   image_geometry::StereoCameraModel model_;
   boost::scoped_ptr<Elas::parameters> param_;
 
-
+  int cur_id_;
   bool running_;
   boost::thread run_thread_;
+
+  std::unordered_map<int, Eigen::Matrix<double, 6, 1>> id_pose_wc_;
+  std::vector<std::pair<int, Eigen::Vector3d>> pts_nearby_;
+  std::vector<Eigen::Vector3d> pts_;
+
+  boost::mutex elas3d_frame_queue_mutex_;
+  std::queue<Elas3DFrame *> elas3d_frame_queue_;
+  std::vector<Elas3DFrame *> elas3d_frames_;
+
   dso::IOWrap::PangolinLoopViewer *pangolin_viewer_;
 
 };

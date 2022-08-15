@@ -6,7 +6,7 @@
 #include <sensor_msgs/image_encodings.h>
 #include "ELASWrapper.h"
 
-ELASWrapper::ELASWrapper() {
+ELASWrapper::ELASWrapper() : cur_id_(-1) {
   ros::NodeHandle local_nh("~");
   local_nh.param("queue_size", queue_size_, 5);
 
@@ -76,8 +76,9 @@ ELASWrapper::ELASWrapper() {
   run_thread_ = boost::thread(&ELASWrapper::run, this);
 }
 
-ELASWrapper::ELASWrapper(dso::IOWrap::PangolinLoopViewer *pangolin_viewer) {
-  pangolin_viewer_ = pangolin_viewer;
+ELASWrapper::ELASWrapper(dso::IOWrap::PangolinLoopViewer *pangolin_viewer)
+    : pangolin_viewer_(pangolin_viewer) {
+  ELASWrapper();
 }
 
 void ELASWrapper::update_stereo_model(const sensor_msgs::CameraInfoConstPtr &l_info_msg,
@@ -129,11 +130,11 @@ ELASWrapper::process(const sensor_msgs::ImageConstPtr &l_image_msg, const sensor
       inliers.push_back(i);
   }
 
-  publish_point_cloud(l_image_msg, l_disp_data, inliers, width, height);
+  generate_pc(l_image_msg, l_disp_data, inliers, width, height);
 }
 
-void ELASWrapper::publish_point_cloud(const sensor_msgs::ImageConstPtr &l_image_msg, float *l_disp_data,
-                                      const std::vector<int32_t> &inliers, int32_t l_width, int32_t l_height) {
+void ELASWrapper::generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg, float *l_disp_data,
+                              const std::vector<int32_t> &inliers, int32_t l_width, int32_t l_height) {
 
   cv_bridge::CvImageConstPtr cv_ptr;
   cv_ptr = cv_bridge::toCvShare(l_image_msg, sensor_msgs::image_encodings::RGB8);
@@ -186,11 +187,69 @@ void ELASWrapper::join() {
 void ELASWrapper::run() {
   std::cout << "Start ELASWrapper Thread" << std::endl;
   while (running_) {
+    boost::unique_lock<boost::mutex> lk_elas3dfq(elas3d_frame_queue_mutex_);
+    if (elas3d_frame_queue_.empty()) {
+      lk_elas3dfq.unlock();
+      usleep(5000);
+      continue;
+    }
+    Elas3DFrame *cur_frame = elas3d_frame_queue_.front();
+    elas3d_frame_queue_.pop();
 
+    // for Pangolin visualization
+    std::vector<Eigen::Vector3d> elas3d_pts = cur_frame->pts;
+
+    elas3d_frames_.emplace_back(cur_frame);
+    // Connection to previous keyframe
+    if (elas3d_frames_.size() > 1) {
+      auto prv_frame = elas3d_frames_[elas3d_frames_.size() - 2];
+      g2o::SE3Quat tfm_prv_cur =
+          (prv_frame->tfm_w_c.inverse() * cur_frame->tfm_w_c);
+    }
+
+    if (pangolin_viewer_) {
+      pangolin_viewer_->refreshElasPtsData(pts_,
+                                         cur_frame->pts.size());
+    }
+    delete cur_frame->fh0;
+    delete cur_frame->fh1;
+    usleep(5000);
   }
+  std::cout << "Finished Loop Thread" << std::endl;
 }
 
 void ELASWrapper::publish_keyframes(dso::FrameHessian *fh0, dso::FrameHessian *fh1, dso::CalibHessian *h_calib) {
+  int prv_id = cur_id_;
+
+  // keep id increasing
+  if (prv_id >= fh0->frameID) {
+    return;
+  }
+
+  cur_id_ = fh0->frameID;
+  dso::SE3 cur_wc = fh0->shell->camToWorld;
+  float fx = h_calib->fxl();
+  float fy = h_calib->fyl();
+  float cx = h_calib->cxl();
+  float cy = h_calib->cyl();
+
+  /* ====================== Extract points ================================ */
+  for (dso::PointHessian *p: fh0->pointHessiansMarginalized) {
+    Eigen::Vector4d p_l((p->u - cx) / fx / p->idepth_scaled,
+                        (p->v - cy) / fy / p->idepth_scaled,
+                        1 / p->idepth_scaled, 1);
+    Eigen::Vector3d p_g = cur_wc.matrix3x4() * p_l;
+    pts_nearby_.emplace_back(std::pair<int, Eigen::Vector3d>(cur_id_, p_g));
+    pts_.emplace_back(p_g);
+  }
+  id_pose_wc_[cur_id_] = cur_wc.log();
+
+  Elas3DFrame *cur_frame = new Elas3DFrame(fh0, fh1, {fx, fy, cx, cy});
+  boost::unique_lock<boost::mutex> lk_elas3dfq(elas3d_frame_queue_mutex_);
+  elas3d_frame_queue_.emplace(cur_frame);
+}
+
+void ELASWrapper::save_pc() {
 
 }
 
