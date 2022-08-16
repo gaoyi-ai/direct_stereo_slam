@@ -24,7 +24,9 @@
 
 namespace dso {
   class FrameHessian;
+
   class CalibHessian;
+
   class FrameShell;
   namespace IOWrap {
     class Output3DWrapper;
@@ -46,13 +48,13 @@ struct Elas3DFrame {
   std::vector<Eigen::Vector3d> pts;
 
   Elas3DFrame(dso::FrameHessian *fh0, dso::FrameHessian *fh1,
-            const std::vector<float> &cam)
-      : fh0(fh0), fh1(fh1) ,kf_id(fh0->frameID),
+              const std::vector<float> &cam)
+      : fh0(fh0), fh1(fh1), kf_id(fh0->frameID),
         incoming_id(fh0->shell->incoming_id),
         tfm_w_c(g2o::SE3Quat(fh0->shell->camToWorld.rotationMatrix(),
                              fh0->shell->camToWorld.translation())),
         trans_w_c_orig(tfm_w_c.translation()), cam(cam),
-        ab_exposure(fh0->ab_exposure){}
+        ab_exposure(fh0->ab_exposure) {}
 
   ~Elas3DFrame() {
   }
@@ -73,8 +75,8 @@ public:
   void publish_keyframes(dso::FrameHessian *fh0, dso::FrameHessian *fh1, dso::CalibHessian *h_calib);
 
   void generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg, float *l_disp_data,
-                  const std::vector<int32_t> &inliers,
-                  int32_t l_width, int32_t l_height);
+                   const std::vector<int32_t> &inliers,
+                   int32_t l_width, int32_t l_height);
 
   void update_stereo_model(const sensor_msgs::CameraInfoConstPtr &l_info_msg,
                            const sensor_msgs::CameraInfoConstPtr &r_info_msg);
@@ -88,7 +90,6 @@ public:
 private:
 
   boost::shared_ptr<Elas> elas_;
-  int queue_size_;
 
   // Struct parameters
   int disp_min;
@@ -134,6 +135,18 @@ private:
 
   dso::IOWrap::PangolinLoopViewer *pangolin_viewer_;
 
+  void preprocess(Eigen::Vector3f *dI,
+                  const uint8_t *out_image_data,
+                  int w, int h);
+
+  void process(Eigen::Vector3f *dI0, Eigen::Vector3f *dI1);
+
+  void compute_pc(uint8_t *l_image_data, float *l_disp_data, const std::vector<int32_t> &inliers,
+                  int32_t l_width,int32_t l_height);
+
+  void compute_pc(uint8_t *l_image_data, float *l_disp_data, std::vector<Eigen::Vector4f> pts,
+                  std::vector<std::pair<int, Eigen::Vector4f>> pts_color, const std::vector<int32_t> &inliers,
+                  int32_t l_width, int32_t l_height);
 };
 
 

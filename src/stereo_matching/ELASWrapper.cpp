@@ -8,7 +8,6 @@
 
 ELASWrapper::ELASWrapper() : cur_id_(-1) {
   ros::NodeHandle local_nh("~");
-  local_nh.param("queue_size", queue_size_, 5);
 
   local_nh.param<int>("disp_min", disp_min, 0);
   local_nh.param<int>("disp_max", disp_max, 255);
@@ -37,7 +36,7 @@ ELASWrapper::ELASWrapper() : cur_id_(-1) {
   // Create the elas processing class
   //param.reset(new Elas::parameters(Elas::MIDDLEBURY));
   //param.reset(new Elas::parameters(Elas::ROBOTICS));
-  param_.reset(new Elas::parameters);
+//  param_.reset(new Elas::parameters);
 
   /* Parameters tunned*/
   param_->disp_min = disp_min;
@@ -70,7 +69,7 @@ ELASWrapper::ELASWrapper() : cur_id_(-1) {
 #ifdef DOWN_SAMPLE
   param_->subsampling = true;
 #endif
-  elas_.reset(new Elas(*param_));
+//  elas_.reset(new Elas(*param_));
 
   running_ = true;
   run_thread_ = boost::thread(&ELASWrapper::run, this);
@@ -114,9 +113,12 @@ void ELASWrapper::run() {
           (prv_frame->tfm_w_c.inverse() * cur_frame->tfm_w_c);
     }
 
+//    生成3D点
+
+
     if (pangolin_viewer_) {
       pangolin_viewer_->refreshElasPtsData(pts_,
-                                         cur_frame->pts.size());
+                                           cur_frame->pts.size());
     }
     delete cur_frame->fh0;
     delete cur_frame->fh1;
@@ -151,7 +153,7 @@ void ELASWrapper::publish_keyframes(dso::FrameHessian *fh0, dso::FrameHessian *f
   }
   id_pose_wc_[cur_id_] = cur_wc.log();
 
-  Elas3DFrame *cur_frame = new Elas3DFrame(fh0, fh1, {fx, fy, cx, cy});
+  auto *cur_frame = new Elas3DFrame(fh0, fh1, {fx, fy, cx, cy});
   boost::unique_lock<boost::mutex> lk_elas3dfq(elas3d_frame_queue_mutex_);
   elas3d_frame_queue_.emplace(cur_frame);
 }
@@ -161,14 +163,78 @@ void ELASWrapper::update_stereo_model(const sensor_msgs::CameraInfoConstPtr &l_i
   model_.fromCameraInfo(l_info_msg, r_info_msg);
 }
 
-void
-ELASWrapper::process(const dso::MinimalImageF3 &l_image, const dso::MinimalImageF3 &r_image) {
-
-  l_image.data
+void ELASWrapper::preprocess(Eigen::Vector3f *dI,
+                             const uint8_t *out_image_data,
+                             int w, int h) {
+  cv::Mat imgf3(h, w, CV_32FC3, dI);
+  std::vector<cv::Mat> imgf;
+  cv::split(imgf3, imgf);
+  cv::Mat img(h, w, CV_8UC1);
+  imgf[0].convertTo(img, CV_8UC1);
+  out_image_data = img.data;
 }
 
 void
-ELASWrapper::process(const sensor_msgs::ImageConstPtr &l_image_msg, const sensor_msgs::ImageConstPtr &r_image_msg) {
+ELASWrapper::process(Eigen::Vector3f *dI0,
+                     Eigen::Vector3f *dI1) {
+  int w = dso::wG[0], h = dso::hG[0];
+  uint8_t *l_image_data = new uint8_t[w * h];
+  uint8_t *r_image_data = new uint8_t[w * h];
+  preprocess(dI0, l_image_data, w, h);
+  preprocess(dI1, r_image_data, w, h);
+
+  // Allocate
+  const int32_t dims[3] = {w, h, static_cast<int32_t>(sizeof(uint8_t) * w)};
+  float *l_disp_data = new float[w * h * sizeof(float)];
+  float *r_disp_data = new float[w * h * sizeof(float)];
+
+  // Process
+  elas_->process(l_image_data, r_image_data, l_disp_data, r_disp_data, dims);
+
+  std::vector<int32_t> inliers;
+  for (int32_t i = 0; i < w * h; i++) {
+    if (l_disp_data[i] > 0) // 记录视差为有效值
+      inliers.push_back(i);
+  }
+
+  std::vector<Eigen::Vector4f> pts;
+  std::vector<std::pair<int, Eigen::Vector4f>> pts_color;
+
+  compute_pc(l_image_data, l_disp_data, pts, pts_color, inliers, w, h);
+}
+
+void ELASWrapper::compute_pc(uint8_t *l_image_data, float *l_disp_data,
+                             std::vector<Eigen::Vector4f> pts,
+                             std::vector<std::pair<int, Eigen::Vector4f>> pts_color,
+                             const std::vector<int32_t> &inliers,
+                             int32_t l_width, int32_t l_height) {
+
+  for (size_t i = 0; i < inliers.size(); i++) {
+    cv::Point2d left_uv;
+    int32_t index = inliers[i];
+#ifdef DOWN_SAMPLE
+    left_uv.x = (index % l_width) * 2;
+    left_uv.y = (index / l_width) * 2;
+#else
+    left_uv.x = index % l_width;
+    left_uv.y = index / l_width;
+#endif
+    cv::Point3d point;
+    model_.projectDisparityTo3d(left_uv, l_disp_data[index], point);
+
+    Eigen::Vector4f v;
+    v << static_cast<float >(point.x), static_cast<float >(point.y), static_cast<float >(point.z), 1;
+    pts.push_back(v);
+    std::pair<int, Eigen::Vector4f> v_color;
+    v_color.first = l_image_data[index];
+    v_color.second = v;
+    pts_color.push_back(v_color);
+  }
+}
+
+void
+ELASWrapper::process(const sensor_msgs::ImageConstPtr &l_image_msg,
+                     const sensor_msgs::ImageConstPtr &r_image_msg) {
   // Have a synchronised pair of images, now to process using elas
   // convert images if necessary
   uint8_t *l_image_data, *r_image_data;
@@ -214,8 +280,10 @@ ELASWrapper::process(const sensor_msgs::ImageConstPtr &l_image_msg, const sensor
   generate_pc(l_image_msg, l_disp_data, inliers, width, height);
 }
 
-void ELASWrapper::generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg, float *l_disp_data,
-                              const std::vector<int32_t> &inliers, int32_t l_width, int32_t l_height) {
+void ELASWrapper::generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg,
+                              float *l_disp_data,
+                              const std::vector<int32_t> &inliers,
+                              int32_t l_width, int32_t l_height) {
 
   cv_bridge::CvImageConstPtr cv_ptr;
   cv_ptr = cv_bridge::toCvShare(l_image_msg, sensor_msgs::image_encodings::RGB8);
@@ -258,5 +326,3 @@ void ELASWrapper::generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg, flo
 void ELASWrapper::save_pc() {
 
 }
-
-
