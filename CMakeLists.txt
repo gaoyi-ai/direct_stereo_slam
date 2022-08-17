@@ -25,6 +25,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_filters
   image_geometry
   stereo_msgs
+        libelas
 )
 
 catkin_package()
@@ -58,7 +59,7 @@ set(DSO_HELPERS_SOURCE_FILES
   src/dso_helpers/FrontEndOptPoint.cpp
 )
 
-include_directories(${DSO_INCLUDE_DIRS} src)
+include_directories(${libelas_INCLUDE_DIRS} ${DSO_INCLUDE_DIRS} src)
 
 add_executable(
   slam_node

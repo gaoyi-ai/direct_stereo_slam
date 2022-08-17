@@ -36,7 +36,7 @@ ELASWrapper::ELASWrapper() : cur_id_(-1) {
   // Create the elas processing class
   //param.reset(new Elas::parameters(Elas::MIDDLEBURY));
   //param.reset(new Elas::parameters(Elas::ROBOTICS));
-//  param_.reset(new Elas::parameters);
+  param_.reset(new Elas::parameters);
 
   /* Parameters tunned*/
   param_->disp_min = disp_min;
@@ -69,7 +69,7 @@ ELASWrapper::ELASWrapper() : cur_id_(-1) {
 #ifdef DOWN_SAMPLE
   param_->subsampling = true;
 #endif
-//  elas_.reset(new Elas(*param_));
+  elas_.reset(new Elas(*param_));
 
   running_ = true;
   run_thread_ = boost::thread(&ELASWrapper::run, this);
@@ -103,22 +103,30 @@ void ELASWrapper::run() {
     elas3d_frame_queue_.pop();
 
     // for Pangolin visualization
-    std::vector<Eigen::Vector3d> elas3d_pts = cur_frame->pts;
+    std::vector<Eigen::Vector3d> elas3d_pts3d = cur_frame->pts3d;
+    auto elas3d_pts4d = cur_frame->pts4d;
+    auto elas3d_pts4d_color = cur_frame->pts4d_color;
 
     elas3d_frames_.emplace_back(cur_frame);
     // Connection to previous keyframe
     if (elas3d_frames_.size() > 1) {
       auto prv_frame = elas3d_frames_[elas3d_frames_.size() - 2];
-      g2o::SE3Quat tfm_prv_cur =
+      dso::SE3 tfm_prv_cur =
           (prv_frame->tfm_w_c.inverse() * cur_frame->tfm_w_c);
     }
 
-//    生成3D点
+    std::vector<std::pair<int, Eigen::Vector3d>> pts3d_color;
 
+    for (int i = 0; i < elas3d_pts4d_color.size(); i++) {
+      Eigen::Vector3d p_g = cur_frame->tfm_w_c.matrix3x4() * elas3d_pts4d_color[i].second;
+      pts_nearby_.emplace_back(std::pair<int, Eigen::Vector3d>(cur_frame->kf_id, p_g));
+      std::cout<<elas3d_pts4d_color[i].first<<std::endl;
+      pts3d_color.emplace_back(std::pair<int, Eigen::Vector3d>(elas3d_pts4d_color[i].first, p_g));
+    }
 
     if (pangolin_viewer_) {
-      pangolin_viewer_->refreshElasPtsData(pts_,
-                                           cur_frame->pts.size());
+      pangolin_viewer_->refreshElasPtsData(pts3d_color,
+                                           pts3d_color.size());
     }
     delete cur_frame->fh0;
     delete cur_frame->fh1;
@@ -149,8 +157,9 @@ void ELASWrapper::publish_keyframes(dso::FrameHessian *fh0, dso::FrameHessian *f
                         1 / p->idepth_scaled, 1);
     Eigen::Vector3d p_g = cur_wc.matrix3x4() * p_l;
     pts_nearby_.emplace_back(std::pair<int, Eigen::Vector3d>(cur_id_, p_g));
-    pts_.emplace_back(p_g);
-  }
+    
+      std::cout << p_g << std::endl;
+  }  
   id_pose_wc_[cur_id_] = cur_wc.log();
 
   auto *cur_frame = new Elas3DFrame(fh0, fh1, {fx, fy, cx, cy});
@@ -176,7 +185,9 @@ void ELASWrapper::preprocess(Eigen::Vector3f *dI,
 
 void
 ELASWrapper::process(Eigen::Vector3f *dI0,
-                     Eigen::Vector3f *dI1) {
+                     Eigen::Vector3f *dI1,
+                     std::vector<Eigen::Vector4d> &pts,
+                     std::vector<std::pair<int, Eigen::Vector4d>> &pts_color) {
   int w = dso::wG[0], h = dso::hG[0];
   uint8_t *l_image_data = new uint8_t[w * h];
   uint8_t *r_image_data = new uint8_t[w * h];
@@ -197,17 +208,14 @@ ELASWrapper::process(Eigen::Vector3f *dI0,
       inliers.push_back(i);
   }
 
-  std::vector<Eigen::Vector4f> pts;
-  std::vector<std::pair<int, Eigen::Vector4f>> pts_color;
-
   compute_pc(l_image_data, l_disp_data, pts, pts_color, inliers, w, h);
 }
 
-void ELASWrapper::compute_pc(uint8_t *l_image_data, float *l_disp_data,
-                             std::vector<Eigen::Vector4f> pts,
-                             std::vector<std::pair<int, Eigen::Vector4f>> pts_color,
-                             const std::vector<int32_t> &inliers,
-                             int32_t l_width, int32_t l_height) {
+inline void ELASWrapper::compute_pc(uint8_t *l_image_data, float *l_disp_data,
+                                    std::vector<Eigen::Vector4d> &pts,
+                                    std::vector<std::pair<int, Eigen::Vector4d>> &pts_color,
+                                    const std::vector<int32_t> &inliers,
+                                    int32_t l_width, int32_t l_height) {
 
   for (size_t i = 0; i < inliers.size(); i++) {
     cv::Point2d left_uv;
@@ -222,12 +230,13 @@ void ELASWrapper::compute_pc(uint8_t *l_image_data, float *l_disp_data,
     cv::Point3d point;
     model_.projectDisparityTo3d(left_uv, l_disp_data[index], point);
 
-    Eigen::Vector4f v;
-    v << static_cast<float >(point.x), static_cast<float >(point.y), static_cast<float >(point.z), 1;
+    Eigen::Vector4d v;
+    v << point.x, point.y, point.z, 1;
     pts.push_back(v);
-    std::pair<int, Eigen::Vector4f> v_color;
+    std::pair<int, Eigen::Vector4d> v_color;
     v_color.first = l_image_data[index];
     v_color.second = v;
+    std::cout<< v_color.first << v_color.second << std::endl;
     pts_color.push_back(v_color);
   }
 }
@@ -301,7 +310,6 @@ void ELASWrapper::generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg,
 
   std::vector<Eigen::Vector3d> pts;
 
-
   for (size_t i = 0; i < inliers.size(); i++) {
     cv::Point2d left_uv;
     int32_t index = inliers[i];
@@ -319,10 +327,16 @@ void ELASWrapper::generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg,
     v << point.x, point.y, point.z;
     pts.push_back(v);
   }
-
-  pangolin_viewer_->refreshElasPtsData(pts, pts.size());
 }
 
 void ELASWrapper::save_pc() {
 
+}
+
+void ELASWrapper::extract_pts(Elas3DFrame *elas3D_frame) {
+  std::vector<Eigen::Vector4d> pts;
+  std::vector<std::pair<int, Eigen::Vector4d>> pts_color;
+  process(elas3D_frame->fh0->dI, elas3D_frame->fh1->dI, pts, pts_color);
+  elas3D_frame->pts4d = pts;
+  elas3D_frame->pts4d_color = pts_color;
 }

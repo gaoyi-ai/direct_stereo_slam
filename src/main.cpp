@@ -88,8 +88,6 @@ int main(int argc, char **argv) {
                      gamma1, nomt, preset, mode, scale_opt_thres, lidar_range,
                      scan_context_thres);
 
-  slam_node.setElasWrapper(new ELASWrapper());
-
   if (!bag_path.empty()) {
 
     rosbag::Bag bag;

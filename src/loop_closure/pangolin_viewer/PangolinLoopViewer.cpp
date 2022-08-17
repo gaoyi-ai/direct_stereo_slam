@@ -44,6 +44,7 @@ PangolinLoopViewer::PangolinLoopViewer(int w, int h, bool startRunThread) {
     run_thread_ = boost::thread(&PangolinLoopViewer::run, this);
 
   lidar_cur_sz_ = 0;
+  elas3d_cur_sz_ = 0;
 }
 
 PangolinLoopViewer::~PangolinLoopViewer() {
@@ -229,7 +230,7 @@ void PangolinLoopViewer::pushDepthImage(MinimalImageB3 *image) {
 }
 
 void PangolinLoopViewer::refreshElasPtsData(
-    const std::vector<Eigen::Vector3d> &pts, size_t cur_sz) {
+    const std::vector<std::pair<int,Eigen::Vector3d>> &pts, size_t cur_sz) {
   boost::unique_lock<boost::mutex> lk(model_elas3d_mutex_);
   assert(cur_sz <= pts.size());
   elas3d_pts_ = pts;
@@ -237,16 +238,14 @@ void PangolinLoopViewer::refreshElasPtsData(
 }
 
 void PangolinLoopViewer::drawElas3D() {
-  glPointSize(3.0);
+  glPointSize(1.0);
 
   glBegin(GL_POINTS);
   for (size_t i = 0; i < elas3d_pts_.size(); i++) {
-    if (i < elas3d_cur_sz_) {
-      glColor3ub(0, 255, 0);
-    } else {
-      glColor3ub(255, 0, 0);
-    }
-    glVertex3f(elas3d_pts_[i](0), elas3d_pts_[i](1), elas3d_pts_[i](2));
+    int color = elas3d_pts_[i].first;
+    std::cout<< "Color: " << color <<std::endl;
+    glColor3ub(color, color, color);
+    glVertex3f(elas3d_pts_[i].second(0), elas3d_pts_[i].second(1), elas3d_pts_[i].second(2));
   }
   glEnd();
 }

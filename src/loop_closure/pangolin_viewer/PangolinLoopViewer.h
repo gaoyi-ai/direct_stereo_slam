@@ -53,7 +53,8 @@ public:
 
   void refreshLidarData(const std::vector<Eigen::Vector3d> &pts, size_t cur_sz);
 
-  void refreshElasPtsData(const std::vector<Eigen::Vector3d> &pts, size_t cur_sz);
+  void refreshElasPtsData(
+      const std::vector<std::pair<int,Eigen::Vector3d>> &pts, size_t cur_sz);
 
   virtual void pushDepthImage(MinimalImageB3 *image) override;
 
@@ -82,7 +83,7 @@ private:
 
   // elas 3D rendering
   boost::mutex model_elas3d_mutex_;
-  std::vector<Eigen::Vector3d> elas3d_pts_;
+  std::vector<std::pair<int,Eigen::Vector3d>> elas3d_pts_;
   size_t elas3d_cur_sz_;
 
   // images rendering

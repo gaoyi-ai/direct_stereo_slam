@@ -13,8 +13,6 @@
 #include <sensor_msgs/CameraInfo.h>
 #include <image_geometry/stereo_camera_model.h>
 #include <message_filters/subscriber.h>
-#include <pcl/impl/point_types.hpp>
-#include <pcl/point_cloud.h>
 
 #include <g2o/types/slam3d/se3quat.h>
 #include <g2o/types/slam3d/types_slam3d.h>
@@ -37,23 +35,23 @@ struct Elas3DFrame {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   int kf_id;                      // kF id, for pose graph and visualization
   int incoming_id;                // increasing id, for ground truth
-  g2o::SE3Quat tfm_w_c;           // coordinate in pose graph
-  Eigen::Vector3d trans_w_c_orig; // original pose for logging
+  dso::SE3 tfm_w_c;           // coordinate in pose graph
 
   dso::FrameHessian *fh0;
   dso::FrameHessian *fh1;
   std::vector<float> cam;
   float ab_exposure;
 
-  std::vector<Eigen::Vector3d> pts;
+  std::vector<Eigen::Vector3d> pts3d;
+  std::vector<Eigen::Vector4d> pts4d;
+  std::vector<std::pair<int, Eigen::Vector4d>> pts4d_color;
 
   Elas3DFrame(dso::FrameHessian *fh0, dso::FrameHessian *fh1,
               const std::vector<float> &cam)
       : fh0(fh0), fh1(fh1), kf_id(fh0->frameID),
         incoming_id(fh0->shell->incoming_id),
-        tfm_w_c(g2o::SE3Quat(fh0->shell->camToWorld.rotationMatrix(),
-                             fh0->shell->camToWorld.translation())),
-        trans_w_c_orig(tfm_w_c.translation()), cam(cam),
+        tfm_w_c(fh0->shell->camToWorld),
+        cam(cam),
         ab_exposure(fh0->ab_exposure) {}
 
   ~Elas3DFrame() {
@@ -127,7 +125,6 @@ private:
 
   std::unordered_map<int, Eigen::Matrix<double, 6, 1>> id_pose_wc_;
   std::vector<std::pair<int, Eigen::Vector3d>> pts_nearby_;
-  std::vector<Eigen::Vector3d> pts_;
 
   boost::mutex elas3d_frame_queue_mutex_;
   std::queue<Elas3DFrame *> elas3d_frame_queue_;
@@ -135,18 +132,23 @@ private:
 
   dso::IOWrap::PangolinLoopViewer *pangolin_viewer_;
 
+  void extract_pts(Elas3DFrame *elas3D_frame);
+
   void preprocess(Eigen::Vector3f *dI,
                   const uint8_t *out_image_data,
                   int w, int h);
 
   void process(Eigen::Vector3f *dI0, Eigen::Vector3f *dI1);
 
-  void compute_pc(uint8_t *l_image_data, float *l_disp_data, const std::vector<int32_t> &inliers,
-                  int32_t l_width,int32_t l_height);
-
-  void compute_pc(uint8_t *l_image_data, float *l_disp_data, std::vector<Eigen::Vector4f> pts,
-                  std::vector<std::pair<int, Eigen::Vector4f>> pts_color, const std::vector<int32_t> &inliers,
+  void compute_pc(uint8_t *l_image_data, float *l_disp_data,
+                  std::vector<Eigen::Vector4d> &pts,
+                  std::vector<std::pair<int, Eigen::Vector4d>> &pts_color,
+                  const std::vector<int32_t> &inliers,
                   int32_t l_width, int32_t l_height);
+
+  void process(Eigen::Vector3f *dI0, Eigen::Vector3f *dI1,
+               std::vector<Eigen::Vector4d> &pts,
+               std::vector<std::pair<int, Eigen::Vector4d>> &pts_color);
 };
 
 
