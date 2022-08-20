@@ -679,8 +679,6 @@ void FrontEnd::addActiveStereoFrame(ImageAndExposure *image0,
       shell1->incoming_id = incoming_id;
       fh1_->shell = shell1;
       fh1_->makeImages(image1->image, 0);
-
-      elas_wrapper_->publish_keyframes(fh, fh1_, &h_calib_);
     }
 
     lock.unlock();
@@ -839,8 +837,16 @@ void FrontEnd::makeKeyFrame(FrameHessian *fh) {
     ow->publishGraph(ef_->connectivityMap);
     ow->publishKeyframes(frame_hessians_, false, &h_calib_);
   }
-
+  //debug
+  //int a;
+  //std::cin >> a;
+  if(fh->frameID > 100 && fh-> frameID < 102) {
+    std::cout << "Till frame ID PC: " << fh->frameID <<std::endl; 
+    std::cout << "Save PC by ElasWrapper." << std::endl;
+    elas_wrapper_->save_pc();
+  }
   // =========================== Marginalize Frames =========================
+  if (fh1_) elas_wrapper_->publish_keyframes(fh, fh1_, &h_calib_);
 
   for (unsigned int i = 0; i < frame_hessians_.size(); i++)
     if (frame_hessians_[i]->flaggedForMarginalization) {
@@ -1014,8 +1020,9 @@ float FrontEnd::optimizeScale() {
   }
   auto t1 = std::chrono::steady_clock::now();
   scale_opt_time_.emplace_back(t1 - t0);
-  delete fh1_->shell;
-  delete fh1_;
+//  在ElasWrapper处理完之后再删除
+//  delete fh1_->shell;
+//  delete fh1_;
 
   bool scale_opt_succeed = scale_error < scale_opt_thres_;
 

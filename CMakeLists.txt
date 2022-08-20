@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(direct_stereo_slam)
 
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 set(CMAKE_CXX_FLAGS "-march=native \
 -Wno-deprecated-declarations \
@@ -73,7 +73,9 @@ add_executable(
   src/loop_closure/pangolin_viewer/KeyFrameDisplay.cpp
   src/loop_closure/loop_detection/ScanContext.cpp
   src/loop_closure/pose_estimation/PoseEstimator.cpp
-        src/stereo_matching/ELASWrapper.cpp)
+        src/stereo_matching/ELASWrapper.cpp
+        src/stereo_matching/ElasFrameDisplay.cpp
+)
 
 target_link_libraries(slam_node
     ${DSO_LIBRARY}

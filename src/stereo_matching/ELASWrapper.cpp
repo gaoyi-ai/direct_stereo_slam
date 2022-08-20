@@ -102,12 +102,15 @@ void ELASWrapper::run() {
     Elas3DFrame *cur_frame = elas3d_frame_queue_.front();
     elas3d_frame_queue_.pop();
 
+    extract_pts(cur_frame);
+
     // for Pangolin visualization
-    std::vector<Eigen::Vector3d> elas3d_pts3d = cur_frame->pts3d;
-    auto elas3d_pts4d = cur_frame->pts4d;
-    auto elas3d_pts4d_color = cur_frame->pts4d_color;
+    std::vector<std::pair<int, Eigen::Vector4d>> elas3d_pts4d_color = cur_frame->pts4d_color;
+
+
 
     elas3d_frames_.emplace_back(cur_frame);
+
     // Connection to previous keyframe
     if (elas3d_frames_.size() > 1) {
       auto prv_frame = elas3d_frames_[elas3d_frames_.size() - 2];
@@ -115,24 +118,25 @@ void ELASWrapper::run() {
           (prv_frame->tfm_w_c.inverse() * cur_frame->tfm_w_c);
     }
 
-    std::vector<std::pair<int, Eigen::Vector3d>> pts3d_color;
-
-    for (int i = 0; i < elas3d_pts4d_color.size(); i++) {
-      Eigen::Vector3d p_g = cur_frame->tfm_w_c.matrix3x4() * elas3d_pts4d_color[i].second;
+    for (auto &pnt4d_color: elas3d_pts4d_color) {
+      Eigen::Vector4d pnt = pnt4d_color.second;
+      Eigen::Vector3d p_g = cur_frame->w_c * pnt;
       pts_nearby_.emplace_back(std::pair<int, Eigen::Vector3d>(cur_frame->kf_id, p_g));
-      std::cout<<elas3d_pts4d_color[i].first<<std::endl;
-      pts3d_color.emplace_back(std::pair<int, Eigen::Vector3d>(elas3d_pts4d_color[i].first, p_g));
+//      std::cout << "[Run] color: " << pnt4d_color.first << std::endl;
+      pts_color_.emplace_back(std::pair<int, Eigen::Vector3d>(pnt4d_color.first, p_g));
     }
 
     if (pangolin_viewer_) {
-      pangolin_viewer_->refreshElasPtsData(pts3d_color,
-                                           pts3d_color.size());
+      pangolin_viewer_->publishElasframes(cur_frame);
+//      pangolin_viewer_->refreshElasPtsData(pts_color_,
+//                                           pts_color_.size());
     }
-    delete cur_frame->fh0;
+
     delete cur_frame->fh1;
+    delete cur_frame->fh1->shell;
     usleep(5000);
   }
-  std::cout << "Finished Loop Thread" << std::endl;
+  std::cout << "Finished ELASWrapper Thread" << std::endl;
 }
 
 void ELASWrapper::publish_keyframes(dso::FrameHessian *fh0, dso::FrameHessian *fh1, dso::CalibHessian *h_calib) {
@@ -157,9 +161,8 @@ void ELASWrapper::publish_keyframes(dso::FrameHessian *fh0, dso::FrameHessian *f
                         1 / p->idepth_scaled, 1);
     Eigen::Vector3d p_g = cur_wc.matrix3x4() * p_l;
     pts_nearby_.emplace_back(std::pair<int, Eigen::Vector3d>(cur_id_, p_g));
-    
-      std::cout << p_g << std::endl;
-  }  
+    pts_color_.emplace_back(std::pair<int, Eigen::Vector3d>(0, p_g));
+  }
   id_pose_wc_[cur_id_] = cur_wc.log();
 
   auto *cur_frame = new Elas3DFrame(fh0, fh1, {fx, fy, cx, cy});
@@ -173,14 +176,11 @@ void ELASWrapper::update_stereo_model(const sensor_msgs::CameraInfoConstPtr &l_i
 }
 
 void ELASWrapper::preprocess(Eigen::Vector3f *dI,
-                             const uint8_t *out_image_data,
+                             uint8_t *out_image_data,
                              int w, int h) {
-  cv::Mat imgf3(h, w, CV_32FC3, dI);
-  std::vector<cv::Mat> imgf;
-  cv::split(imgf3, imgf);
-  cv::Mat img(h, w, CV_8UC1);
-  imgf[0].convertTo(img, CV_8UC1);
-  out_image_data = img.data;
+  for (int i = 0; i < w * h; i++) {
+    out_image_data[i] = static_cast<uint8_t>(dI[i][0]);
+  }
 }
 
 void
@@ -189,8 +189,8 @@ ELASWrapper::process(Eigen::Vector3f *dI0,
                      std::vector<Eigen::Vector4d> &pts,
                      std::vector<std::pair<int, Eigen::Vector4d>> &pts_color) {
   int w = dso::wG[0], h = dso::hG[0];
-  uint8_t *l_image_data = new uint8_t[w * h];
-  uint8_t *r_image_data = new uint8_t[w * h];
+  auto *l_image_data = new uint8_t[w * h];
+  auto *r_image_data = new uint8_t[w * h];
   preprocess(dI0, l_image_data, w, h);
   preprocess(dI1, r_image_data, w, h);
 
@@ -236,101 +236,49 @@ inline void ELASWrapper::compute_pc(uint8_t *l_image_data, float *l_disp_data,
     std::pair<int, Eigen::Vector4d> v_color;
     v_color.first = l_image_data[index];
     v_color.second = v;
-    std::cout<< v_color.first << v_color.second << std::endl;
+//    std::cout << "[compute_pc] Color: " << v_color.first << "\nxyz: " << v_color.second << std::endl;
     pts_color.push_back(v_color);
   }
 }
 
-void
-ELASWrapper::process(const sensor_msgs::ImageConstPtr &l_image_msg,
-                     const sensor_msgs::ImageConstPtr &r_image_msg) {
-  // Have a synchronised pair of images, now to process using elas
-  // convert images if necessary
-  uint8_t *l_image_data, *r_image_data;
-  int32_t l_step, r_step;
-  cv_bridge::CvImageConstPtr l_cv_ptr, r_cv_ptr;
-  if (l_image_msg->encoding == sensor_msgs::image_encodings::MONO8) {
-    l_image_data = const_cast<uint8_t *>(&(l_image_msg->data[0]));
-    l_step = l_image_msg->step;
-  } else {
-    l_cv_ptr = cv_bridge::toCvShare(l_image_msg, sensor_msgs::image_encodings::MONO8);
-    l_image_data = l_cv_ptr->image.data;
-    l_step = l_cv_ptr->image.step[0];
-  }
-  if (r_image_msg->encoding == sensor_msgs::image_encodings::MONO8) {
-    r_image_data = const_cast<uint8_t *>(&(r_image_msg->data[0]));
-  } else {
-    r_cv_ptr = cv_bridge::toCvShare(r_image_msg, sensor_msgs::image_encodings::MONO8);
-    r_image_data = r_cv_ptr->image.data;
-  }
+void ELASWrapper::save_pc() {
+  running_ = false;
 
-#ifdef DOWN_SAMPLE
-  int32_t width = l_image_msg->width / 2;
-    int32_t height = l_image_msg->height / 2;
-#else
-  int32_t width = l_image_msg->width;
-  int32_t height = l_image_msg->height;
-#endif
+  std::vector<std::pair<int, Eigen::Vector3d>> out_pts;
 
-  // Allocate
-  const int32_t dims[3] = {static_cast<int32_t>(l_image_msg->width), static_cast<int32_t>(l_image_msg->height), l_step};
-  float *l_disp_data = new float[width * height * sizeof(float)];
-  float *r_disp_data = new float[width * height * sizeof(float)];
+  for (auto &elas_f: elas3d_frames_) {
+    auto t_wc = elas_f->w_c;
 
-  // Process
-  elas_->process(l_image_data, r_image_data, l_disp_data, r_disp_data, dims);
+    auto pts4d_color = elas_f->pts4d_color;
 
-  std::vector<int32_t> inliers;
-  for (int32_t i = 0; i < width * height; i++) {
-    if (l_disp_data[i] > 0) // 记录视差为有效值
-      inliers.push_back(i);
-  }
-
-  generate_pc(l_image_msg, l_disp_data, inliers, width, height);
-}
-
-void ELASWrapper::generate_pc(const sensor_msgs::ImageConstPtr &l_image_msg,
-                              float *l_disp_data,
-                              const std::vector<int32_t> &inliers,
-                              int32_t l_width, int32_t l_height) {
-
-  cv_bridge::CvImageConstPtr cv_ptr;
-  cv_ptr = cv_bridge::toCvShare(l_image_msg, sensor_msgs::image_encodings::RGB8);
-  // Copy into the data
-  for (int32_t u = 0; u < l_width; u++) {
-    for (int32_t v = 0; v < l_height; v++) {
-      int index = v * l_width + u;
-#ifdef DOWN_SAMPLE
-      cv::Vec3b col = cv_ptr->image.at<cv::Vec3b>(v * 2, u * 2);
-#else
-      cv::Vec3b col = cv_ptr->image.at<cv::Vec3b>(v, u);
-#endif
+    for (auto &pnt4d_color: pts4d_color) {
+      Eigen::Vector4d pnt = pnt4d_color.second;
+      Eigen::Vector3d p_g = t_wc * pnt;
+      out_pts.emplace_back(std::pair<int, Eigen::Vector3d>(pnt4d_color.first, p_g));
     }
   }
 
-  std::vector<Eigen::Vector3d> pts;
+  std::ofstream dslam_elas3d_file;
+  dslam_elas3d_file.open("dslam_elas3d.ply");
+  dslam_elas3d_file << std::setprecision(6);
 
-  for (size_t i = 0; i < inliers.size(); i++) {
-    cv::Point2d left_uv;
-    int32_t index = inliers[i];
-#ifdef DOWN_SAMPLE
-    left_uv.x = (index % l_width) * 2;
-    left_uv.y = (index / l_width) * 2;
-#else
-    left_uv.x = index % l_width;
-    left_uv.y = index / l_width;
-#endif
-    cv::Point3d point;
-    model_.projectDisparityTo3d(left_uv, l_disp_data[index], point);
+  dslam_elas3d_file << "ply\n";
+  dslam_elas3d_file << "format ascii 1.0\n";
+  dslam_elas3d_file << "element vertex " << out_pts.size() << std::endl;
+  dslam_elas3d_file << "property float x\n";
+  dslam_elas3d_file << "property float y\n";
+  dslam_elas3d_file << "property float z\n";
+  dslam_elas3d_file << "property uchar red\n";
+  dslam_elas3d_file << "property uchar green\n";
+  dslam_elas3d_file << "property uchar blue\n";
+  dslam_elas3d_file << "end_header\n";
 
-    Eigen::Matrix<double, 3, 1> v;
-    v << point.x, point.y, point.z;
-    pts.push_back(v);
-  }
-}
+  std::for_each(out_pts.begin(), out_pts.end(), [&](const auto &item) {
+    dslam_elas3d_file << item.second[0] << " " << item.second[1] << " " << item.second[2] << " ";
+    dslam_elas3d_file << item.first <<" " << item.first << " " << item.first << std::endl;
+  });
 
-void ELASWrapper::save_pc() {
-
+  dslam_elas3d_file.close();
 }
 
 void ELASWrapper::extract_pts(Elas3DFrame *elas3D_frame) {

@@ -209,9 +209,6 @@ void SLAMNode::imageMessageCallback(const sensor_msgs::ImageConstPtr &msg0,
   auto t1 = std::chrono::steady_clock::now();
   frame_tt_.push_back(t1 - t0);
 
-  // matching entry
-  elas_wrapper_->process(msg0, msg1);
-
   incomingId++;
   delete undistImg0;
   delete undistImg1;
