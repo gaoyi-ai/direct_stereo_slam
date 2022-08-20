@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(direct_stereo_slam)
 
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 set(CMAKE_CXX_FLAGS "-march=native \
 -Wno-deprecated-declarations \
@@ -23,6 +23,9 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   image_transport
   message_filters
+  image_geometry
+  stereo_msgs
+        libelas
 )
 
 catkin_package()
@@ -56,20 +59,24 @@ set(DSO_HELPERS_SOURCE_FILES
   src/dso_helpers/FrontEndOptPoint.cpp
 )
 
-include_directories(${DSO_INCLUDE_DIRS} src)
+include_directories(${libelas_INCLUDE_DIRS} ${DSO_INCLUDE_DIRS} src)
 
 add_executable(
-  slam_node 
-  src/main.cpp 
+  slam_node
+  src/main.cpp
+  src/SLAMNode.cpp
   src/FrontEnd.cpp
-  ${DSO_HELPERS_SOURCE_FILES} 
-  src/scale_optimization/TrackerAndScaler.cpp 
-  src/loop_closure/LoopHandler.cpp 
-  src/loop_closure/pangolin_viewer/PangolinLoopViewer.cpp 
-  src/loop_closure/pangolin_viewer/KeyFrameDisplay.cpp 
-  src/loop_closure/loop_detection/ScanContext.cpp 
-  src/loop_closure/pose_estimation/PoseEstimator.cpp)
-  
+  ${DSO_HELPERS_SOURCE_FILES}
+  src/scale_optimization/TrackerAndScaler.cpp
+  src/loop_closure/LoopHandler.cpp
+  src/loop_closure/pangolin_viewer/PangolinLoopViewer.cpp
+  src/loop_closure/pangolin_viewer/KeyFrameDisplay.cpp
+  src/loop_closure/loop_detection/ScanContext.cpp
+  src/loop_closure/pose_estimation/PoseEstimator.cpp
+        src/stereo_matching/ELASWrapper.cpp
+        src/stereo_matching/ElasFrameDisplay.cpp
+)
+
 target_link_libraries(slam_node
     ${DSO_LIBRARY}
     ${Pangolin_LIBRARIES}

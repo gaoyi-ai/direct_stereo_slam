@@ -22,6 +22,12 @@
 #include <deque>
 #include <map>
 #include <pangolin/pangolin.h>
+#include "stereo_matching/ElasFrameDisplay.h"
+#include "stereo_matching/ELASWrapper.h"
+
+class Elas3DFrame;
+
+class ElasFrameDisplay;
 
 namespace dso {
 
@@ -53,6 +59,11 @@ public:
 
   void refreshLidarData(const std::vector<Eigen::Vector3d> &pts, size_t cur_sz);
 
+  void publishElasframes(Elas3DFrame* fh);
+
+  void refreshElasPtsData(
+      const std::vector<std::pair<int,Eigen::Vector3d>> &pts, size_t cur_sz);
+
   virtual void pushDepthImage(MinimalImageB3 *image) override;
 
   virtual void join() override;
@@ -61,6 +72,8 @@ private:
   void drawConstraints();
 
   void drawLidar();
+
+  void drawElas3D();
 
   boost::thread run_thread_;
   bool running_;
@@ -71,10 +84,20 @@ private:
   std::vector<KeyFrameDisplay *> keyframes_;
   std::map<int, KeyFrameDisplay *> keyframes_by_id_;
 
+  // elas 3D rendering
+  boost::mutex model_elas3d_frame_mutex_;
+  std::vector<ElasFrameDisplay *> elasframes_;
+  std::map<int, ElasFrameDisplay *> elasframes_by_id_;
+
   // lidar rendering
   boost::mutex model_lidar_mutex_;
   std::vector<Eigen::Vector3d> lidar_pts_;
   size_t lidar_cur_sz_;
+
+  // elas 3D rendering
+  boost::mutex model_elas3d_mutex_;
+  std::vector<std::pair<int,Eigen::Vector3d>> elas3d_pts_;
+  size_t elas3d_cur_sz_;
 
   // images rendering
   boost::mutex open_images_mutex_;

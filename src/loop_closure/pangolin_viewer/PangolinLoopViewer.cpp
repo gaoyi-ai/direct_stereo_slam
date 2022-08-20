@@ -44,6 +44,7 @@ PangolinLoopViewer::PangolinLoopViewer(int w, int h, bool startRunThread) {
     run_thread_ = boost::thread(&PangolinLoopViewer::run, this);
 
   lidar_cur_sz_ = 0;
+  elas3d_cur_sz_ = 0;
 }
 
 PangolinLoopViewer::~PangolinLoopViewer() {
@@ -63,12 +64,19 @@ void PangolinLoopViewer::run() {
   glEnable(GL_DEPTH_TEST);
 
   // 3D visualization
-  pangolin::OpenGlRenderState Visualization3D_camera(proj_mat, model_view);
+//  pangolin::OpenGlRenderState Visualization3D_camera(proj_mat, model_view);
+//
+//  pangolin::View &Visualization3D_display =
+//      pangolin::CreateDisplay()
+//          .SetBounds(0.3, 1.0, 0.0, 1.0, -ratio)
+//          .SetHandler(new pangolin::Handler3D(Visualization3D_camera));
 
-  pangolin::View &Visualization3D_display =
+  pangolin::OpenGlRenderState VisualizationELAS3D_camera(proj_mat, model_view);
+
+  pangolin::View &VisualizationELAS3D_display =
       pangolin::CreateDisplay()
           .SetBounds(0.3, 1.0, 0.0, 1.0, -ratio)
-          .SetHandler(new pangolin::Handler3D(Visualization3D_camera));
+          .SetHandler(new pangolin::Handler3D(VisualizationELAS3D_camera));
 
   // keyframe depth visualization
   pangolin::GlTexture texKFDepth(w_, h_, GL_RGB, false, 0, GL_RGB,
@@ -95,15 +103,24 @@ void PangolinLoopViewer::run() {
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 
     // Activate efficiently by object
-    Visualization3D_display.Activate(Visualization3D_camera);
-    boost::unique_lock<boost::mutex> lk3d(model_3d_mutex_);
+//    Visualization3D_display.Activate(Visualization3D_camera);
+//    boost::unique_lock<boost::mutex> lk3d(model_3d_mutex_);
+//    // pangolin::glDrawColouredCube();
+//    for (KeyFrameDisplay *fh : keyframes_) {
+//      fh->refreshPC();
+//      fh->drawPC(1);
+//    }
+//    drawConstraints();
+//    lk3d.unlock();
+
+    VisualizationELAS3D_display.Activate(VisualizationELAS3D_camera);
+    boost::unique_lock<boost::mutex> lelasf3d(model_elas3d_frame_mutex_);
     // pangolin::glDrawColouredCube();
-    for (KeyFrameDisplay *fh : keyframes_) {
+    for (ElasFrameDisplay *fh : elasframes_) {
       fh->refreshPC();
       fh->drawPC(1);
     }
-    drawConstraints();
-    lk3d.unlock();
+    lelasf3d.unlock();
 
     open_images_mutex_.lock();
     if (kf_img_changed_)
@@ -174,6 +191,24 @@ void PangolinLoopViewer::publishKeyframes(std::vector<FrameHessian *> &frames,
   keyframes_by_id_[fh->frameID]->setFromKF(fh, HCalib);
 }
 
+void PangolinLoopViewer::publishElasframes(Elas3DFrame* fh) {
+  static int prv_elasF_id = -1;
+
+  // keep incoming id increasing
+  if (prv_elasF_id >= fh->kf_id) {
+    return;
+  }
+  prv_elasF_id = fh->kf_id;
+
+  boost::unique_lock<boost::mutex> lk(model_elas3d_frame_mutex_);
+  if (elasframes_by_id_.find(fh->kf_id) == elasframes_by_id_.end()) {
+    ElasFrameDisplay *kfd = new ElasFrameDisplay();
+    elasframes_by_id_[fh->kf_id] = kfd;
+    elasframes_.push_back(kfd);
+  }
+  elasframes_by_id_[fh->kf_id]->setFromKF(fh);
+}
+
 void PangolinLoopViewer::modifyKeyframePoseByKFID(int id,
                                                   const SE3 &poseCamToWorld) {
   boost::unique_lock<boost::mutex> lk3d(model_3d_mutex_);
@@ -214,6 +249,26 @@ void PangolinLoopViewer::pushDepthImage(MinimalImageB3 *image) {
   boost::unique_lock<boost::mutex> lk(open_images_mutex_);
   memcpy(internal_kf_img_->data, image->data, w_ * h_ * 3);
   kf_img_changed_ = true;
+}
+
+void PangolinLoopViewer::refreshElasPtsData(
+    const std::vector<std::pair<int,Eigen::Vector3d>> &pts, size_t cur_sz) {
+  boost::unique_lock<boost::mutex> lk(model_elas3d_mutex_);
+  assert(cur_sz <= pts.size());
+  elas3d_pts_ = pts;
+  elas3d_cur_sz_ = cur_sz;
+}
+
+void PangolinLoopViewer::drawElas3D() {
+  glPointSize(1.0);
+
+  glBegin(GL_POINTS);
+  for (size_t i = 0; i < elas3d_pts_.size(); i++) {
+    int color = elas3d_pts_[i].first;
+    glColor3ub(color, color, color);
+    glVertex3f(elas3d_pts_[i].second(0), elas3d_pts_[i].second(1), elas3d_pts_[i].second(2));
+  }
+  glEnd();
 }
 
 } // namespace IOWrap

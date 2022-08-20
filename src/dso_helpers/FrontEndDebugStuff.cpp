@@ -275,7 +275,7 @@ void FrontEnd::debugPlot(std::string name) {
   for (unsigned int i = 0; i < images.size(); i++)
     delete images[i];
 
-  if ((debugSaveImages && false)) {
+  if (debugSaveImages) {
     for (unsigned int f = 0; f < frame_hessians_.size(); f++) {
       MinimalImageB3 *img = new MinimalImageB3(wG[0], hG[0]);
       Eigen::Vector3f *fd = frame_hessians_[f]->dI;

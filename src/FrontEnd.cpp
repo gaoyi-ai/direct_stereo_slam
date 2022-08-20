@@ -42,6 +42,7 @@
 #include <cmath>
 #include <fstream>
 #include <queue>
+#include "stereo_matching/ELASWrapper.h"
 
 namespace dso {
 int FrameHessian::instanceCounter = 0;
@@ -699,8 +700,14 @@ void FrontEnd::deliverTrackedFrame(FrameHessian *fh, bool needKF) {
   } else
     handleKey(IOWrap::waitKey(1));
 
-  if (needKF)
-    makeKeyFrame(fh);
+  if (needKF) {
+      // 关键帧在 SCALE OPTIMIZATION 中需要使用双目图像
+      // 并且在优化后删除右目图像
+      // 其余流程中均未使用右目图像
+
+      makeKeyFrame(fh);
+
+  }
   else
     makeNonKeyFrame(fh);
 }
@@ -804,6 +811,7 @@ void FrontEnd::makeKeyFrame(FrameHessian *fh) {
 
   // =========================== SCALE OPTIMIZATION =========================
   if (scale_opt_thres_ > 0 && all_keyframes_history_.size() > 4) {
+    // 利用双目图像优化尺度
     float scale_error = optimizeScale();
     scale_errors_.push_back(scale_error);
   } else {
@@ -829,8 +837,16 @@ void FrontEnd::makeKeyFrame(FrameHessian *fh) {
     ow->publishGraph(ef_->connectivityMap);
     ow->publishKeyframes(frame_hessians_, false, &h_calib_);
   }
-
+  //debug
+  //int a;
+  //std::cin >> a;
+  if(fh->frameID > 100 && fh-> frameID < 102) {
+    std::cout << "Till frame ID PC: " << fh->frameID <<std::endl; 
+    std::cout << "Save PC by ElasWrapper." << std::endl;
+    elas_wrapper_->save_pc();
+  }
   // =========================== Marginalize Frames =========================
+  if (fh1_) elas_wrapper_->publish_keyframes(fh, fh1_, &h_calib_);
 
   for (unsigned int i = 0; i < frame_hessians_.size(); i++)
     if (frame_hessians_[i]->flaggedForMarginalization) {
@@ -1004,8 +1020,9 @@ float FrontEnd::optimizeScale() {
   }
   auto t1 = std::chrono::steady_clock::now();
   scale_opt_time_.emplace_back(t1 - t0);
-  delete fh1_->shell;
-  delete fh1_;
+//  在ElasWrapper处理完之后再删除
+//  delete fh1_->shell;
+//  delete fh1_;
 
   bool scale_opt_succeed = scale_error < scale_opt_thres_;
 
@@ -1070,6 +1087,11 @@ void FrontEnd::setLoopHandler(LoopHandler *loop_handler) {
 
 int FrontEnd::getTotalKFSize() {
   return all_keyframes_history_.size() + prev_kf_size_;
+}
+
+/* ============================ Stereo Matching ============================= */
+void FrontEnd::setElasWrapper(ELASWrapper *elasWrapper) {
+  elas_wrapper_ = elasWrapper;
 }
 
 } // namespace dso
